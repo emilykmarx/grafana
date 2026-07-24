@@ -11,6 +11,8 @@ import { GRAFANA_RULES_SOURCE_NAME } from '../../utils/datasource';
 import { makeEditContactPointLink, makeEditTimeIntervalLink } from '../../utils/misc';
 import { createRelativeUrl } from '../../utils/url';
 
+import { PromoteConfirmModal } from './PromoteConfirmModal';
+import { RevertConfirmModal } from './RevertConfirmModal';
 import {
   type StagedExtraConfig,
   encodeRouteMatchersQuery,
@@ -65,6 +67,8 @@ interface AccordionSection {
 
 interface Props {
   stagedConfig: StagedExtraConfig;
+  /** Whether the current user can promote/revert (write) the staged configuration. */
+  canUpdate: boolean;
   /**
    * The live Grafana Alertmanager config the staged one is merged against. Needed to work out which staged
    * resources the backend renames on a name collision, so their View links address the staged copy.
@@ -72,8 +76,13 @@ interface Props {
   liveConfig?: AlertmanagerConfig;
 }
 
-export function StagedConfiguration({ stagedConfig, liveConfig }: Props) {
+export function StagedConfiguration({ stagedConfig, canUpdate, liveConfig }: Props) {
   const styles = useStyles2(getStyles);
+  const [openModal, setOpenModal] = useState<'promote' | 'revert' | null>(null);
+  const noPermissionTooltip = t(
+    'alerting.settings.import.no-write-permission',
+    "You don't have permission to modify the imported configuration."
+  );
   const config = parseStagedAlertmanagerConfig(stagedConfig.alertmanager_config);
 
   if (!config) {
@@ -214,17 +223,45 @@ export function StagedConfiguration({ stagedConfig, liveConfig }: Props) {
 
   return (
     <div className={styles.card}>
-      <Stack direction="row" alignItems="center" gap={1}>
-        <Text element="h3" variant="h5">
-          {stagedConfig.identifier}
-        </Text>
-        <Badge
-          color="blue"
-          icon="cloud-upload"
-          text={t('alerting.settings.import.staged-badge', 'Staged · read-only')}
-        />
+      <Stack direction="row" alignItems="center" justifyContent="space-between" gap={1} wrap="wrap">
+        <Stack direction="row" alignItems="center" gap={1}>
+          <Text element="h3" variant="h5">
+            {stagedConfig.identifier}
+          </Text>
+          <Badge
+            color="blue"
+            icon="cloud-upload"
+            text={t('alerting.settings.import.staged-badge', 'Staged · read-only')}
+          />
+        </Stack>
+        <Stack direction="row" gap={1}>
+          <Button
+            variant="secondary"
+            disabled={!canUpdate}
+            tooltip={canUpdate ? undefined : noPermissionTooltip}
+            onClick={() => setOpenModal('revert')}
+          >
+            <Trans i18nKey="alerting.settings.import.revert-button">Revert</Trans>
+          </Button>
+          <Button
+            variant="primary"
+            icon="cloud-upload"
+            disabled={!canUpdate}
+            tooltip={canUpdate ? undefined : noPermissionTooltip}
+            onClick={() => setOpenModal('promote')}
+          >
+            <Trans i18nKey="alerting.settings.import.promote-button">Promote to live config</Trans>
+          </Button>
+        </Stack>
       </Stack>
       <ResourceAccordion sections={sections} />
+
+      {openModal === 'promote' && (
+        <PromoteConfirmModal stagedConfig={stagedConfig} onDismiss={() => setOpenModal(null)} />
+      )}
+      {openModal === 'revert' && (
+        <RevertConfirmModal stagedConfig={stagedConfig} onDismiss={() => setOpenModal(null)} />
+      )}
     </div>
   );
 }

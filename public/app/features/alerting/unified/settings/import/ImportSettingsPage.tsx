@@ -3,6 +3,8 @@ import { useEffect } from 'react';
 import { Trans, t } from '@grafana/i18n';
 import { config } from '@grafana/runtime';
 import { Alert, Button, EmptyState, LinkButton, LoadingPlaceholder, Stack, Text, TextLink } from '@grafana/ui';
+import { contextSrv } from 'app/core/services/context_srv';
+import { AccessControlAction } from 'app/types/accessControl';
 
 import { logError } from '../../Analytics';
 import { AlertingPageWrapper } from '../../components/AlertingPageWrapper';
@@ -59,6 +61,8 @@ function ImportSettingsContent() {
 }
 
 function StagedConfigurationSection() {
+  // Promote and revert are authorized server-side; this only drives the disabled state of the buttons.
+  const canUpdate = contextSrv.hasPermission(AccessControlAction.AlertingNotificationsWrite);
   const { data, isLoading, isError, error, refetch } = useAlertmanagerConfig(GRAFANA_RULES_SOURCE_NAME);
 
   useEffect(() => {
@@ -124,7 +128,7 @@ function StagedConfigurationSection() {
       )}
 
       {!isLoading && !isError && stagedConfig && (
-        <StagedConfiguration stagedConfig={stagedConfig} liveConfig={data?.alertmanager_config} />
+        <StagedConfiguration stagedConfig={stagedConfig} canUpdate={canUpdate} liveConfig={data?.alertmanager_config} />
       )}
     </Stack>
   );
