@@ -71,7 +71,7 @@ describe('useGetResourceRepositoryView', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    config.featureToggles = { ...originalToggles, provisioning: true };
+    config.featureToggles = { ...originalToggles };
   });
 
   afterEach(() => {

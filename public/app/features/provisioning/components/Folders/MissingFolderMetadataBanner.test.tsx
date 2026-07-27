@@ -1,4 +1,4 @@
-import { render, screen, testWithFeatureToggles } from 'test/test-utils';
+import { render, screen } from 'test/test-utils';
 
 import { setTestFlags } from '@grafana/test-utils/unstable';
 
@@ -71,8 +71,6 @@ describe('MissingFolderMetadataBanner', () => {
 });
 
 describe('FolderPermissions', () => {
-  testWithFeatureToggles({ enable: ['provisioning'] });
-
   beforeEach(() => {
     jest.clearAllMocks();
   });
