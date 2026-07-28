@@ -84,6 +84,10 @@ export const convertToGMAApi = alertingApi.injectEndpoints({
           ...(promote ? { 'X-Grafana-Alerting-Promote': 'true' } : {}),
         },
       }),
+      // Importing writes into the AM config (staged imports land on its extra_config), so the config
+      // query has to refetch — otherwise the Import tab the wizard redirects to renders its cached,
+      // pre-import config and shows the empty state instead of the freshly staged one.
+      invalidatesTags: ['AlertmanagerConfiguration'],
     }),
 
     /**
