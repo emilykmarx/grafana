@@ -172,7 +172,7 @@ export async function fetchTracesActivity(ds: Pick<DataSourceInstanceListItem, '
   };
 }
 
-interface MetricsDiskPressure {
+export interface MetricsDiskPressure {
   /** Hosts whose fullest filesystem exceeds the pressure threshold. */
   hostsAbove: number;
   worstInstance: string | null;
