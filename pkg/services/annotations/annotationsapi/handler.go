@@ -251,6 +251,47 @@ func (h *MigrationProxy) Delete(ctx context.Context, orgID int64, annotationID i
 	return h.client.Delete(ctx, orgID, existing.GetName())
 }
 
+// MassDelete removes every annotation on a dashboard panel from the new store.
+//
+// The new API has no delete-collection route, so this enumerates the panel's annotations
+// via /search and deletes them one by one. Unlike the legacy SQL mass delete, this is not
+// atomic: a failure part-way through leaves the earlier deletes applied. Callers still
+// delete the legacy copies, and a retried mass delete converges since the deletes are
+// idempotent.
+//
+// Records already gone from the new store are skipped rather than treated as an error, so
+// a re-run cleans up whatever a partial failure left behind.
+func (h *MigrationProxy) MassDelete(ctx context.Context, orgID int64, dashboardUID string, panelID int64) error {
+	var continueToken string
+	// Guard against a server that keeps handing back a token; each page must make progress.
+	for range maxMassDeletePages {
+		annos, next, err := h.client.SearchByPanel(ctx, orgID, dashboardUID, panelID, continueToken)
+		if err != nil {
+			return err
+		}
+
+		for i := range annos {
+			anno := &annos[i]
+			if anno.GetDeletionTimestamp() != nil {
+				continue // already tombstoned
+			}
+			if err := h.client.Delete(ctx, orgID, anno.GetName()); err != nil {
+				return fmt.Errorf("deleting annotation %q: %w", anno.GetName(), err)
+			}
+		}
+
+		if next == "" {
+			return nil
+		}
+		continueToken = next
+	}
+
+	return fmt.Errorf("annotation mass delete: exceeded %d pages for dashboard %q panel %d", maxMassDeletePages, dashboardUID, panelID)
+}
+
+// maxMassDeletePages bounds how many /search pages a single mass delete will walk.
+const maxMassDeletePages = 1000
+
 // Get reads a single annotation from the new store. Returns ErrNotFound if the
 // record is not there yet (caller falls back to legacy) or ErrGone if it was
 // soft-deleted (caller must not fall back).

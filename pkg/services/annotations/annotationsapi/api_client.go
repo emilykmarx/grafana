@@ -31,6 +31,7 @@ type annotationClient interface {
 	Delete(ctx context.Context, orgID int64, name string) error
 	GetByLegacyID(ctx context.Context, orgID int64, annotationID int64) (*annotationV0.Annotation, error)
 	Search(ctx context.Context, orgID int64, query *annotations.ItemQuery) ([]*annotationV0.Annotation, error)
+	SearchByPanel(ctx context.Context, orgID int64, dashboardUID string, panelID int64, continueToken string) ([]annotationV0.Annotation, string, error)
 }
 
 var _ annotationClient = (*annotationAPIClient)(nil)
@@ -195,6 +196,38 @@ func (s *annotationAPIClient) Search(ctx context.Context, orgID int64, query *an
 		result[i] = &list[i]
 	}
 	return result, nil
+}
+
+// massDeletePageSize is how many annotations are fetched per /search page when
+// enumerating a dashboard panel's annotations for a mass delete.
+const massDeletePageSize = 500
+
+// SearchByPanel returns one page of live annotations for a dashboard panel along with the
+// continue token for the next page. An empty returned token means the last page.
+//
+// The new API has no delete-collection route, so a mass delete has to enumerate the
+// matching annotations and delete them individually.
+func (s *annotationAPIClient) SearchByPanel(ctx context.Context, orgID int64, dashboardUID string, panelID int64, continueToken string) ([]annotationV0.Annotation, string, error) {
+	req := s.client.Get().
+		Namespace(s.nsMapper(orgID)).
+		Resource("search").
+		Param("dashboardUID", dashboardUID).
+		Param("panelID", strconv.FormatInt(panelID, 10)).
+		Param("limit", strconv.Itoa(massDeletePageSize))
+	if continueToken != "" {
+		req = req.Param("continue", continueToken)
+	}
+
+	raw, err := req.DoRaw(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+
+	var list annotationV0.AnnotationList
+	if err := json.Unmarshal(raw, &list); err != nil {
+		return nil, "", fmt.Errorf("decode search response: %w", err)
+	}
+	return list.Items, list.Continue, nil
 }
 
 // collection builds a request against the namespaced annotations collection for orgID.

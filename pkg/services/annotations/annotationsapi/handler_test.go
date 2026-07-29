@@ -2,6 +2,7 @@ package annotationsapi
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -172,6 +173,37 @@ type fakeClient struct {
 	deletedNames []string
 	deleteErr    error
 	createErr    error
+
+	// searchPages are returned by SearchByPanel one page at a time; the continue token is
+	// the next page's index, so the fake exercises the proxy's pagination loop.
+	searchPages  [][]annotationV0.Annotation
+	searchErr    error
+	searchTokens []string
+}
+
+func (f *fakeClient) SearchByPanel(_ context.Context, _ int64, _ string, _ int64, continueToken string) ([]annotationV0.Annotation, string, error) {
+	f.searchTokens = append(f.searchTokens, continueToken)
+	if f.searchErr != nil {
+		return nil, "", f.searchErr
+	}
+
+	page := 0
+	if continueToken != "" {
+		var err error
+		page, err = strconv.Atoi(continueToken)
+		if err != nil {
+			return nil, "", err
+		}
+	}
+	if page >= len(f.searchPages) {
+		return nil, "", nil
+	}
+
+	next := ""
+	if page+1 < len(f.searchPages) {
+		next = strconv.Itoa(page + 1)
+	}
+	return f.searchPages[page], next, nil
 }
 
 func (f *fakeClient) GetByLegacyID(context.Context, int64, int64) (*annotationV0.Annotation, error) {
@@ -382,6 +414,85 @@ func TestMigrationProxy(t *testing.T) {
 			err := proxy.Update(context.Background(), orgID, legacyID, &annotations.Item{Text: "before", Epoch: 5000})
 			require.ErrorIs(t, err, assert.AnError)
 			assert.Empty(t, client.deletedNames, "the old record must not be deleted if the new one was not created")
+		})
+	})
+
+	t.Run("MassDelete", func(t *testing.T) {
+		const orgID = int64(1)
+
+		newProxy := func(client annotationClient) *MigrationProxy {
+			return &MigrationProxy{client: client, logger: log.New("test")}
+		}
+
+		anno := func(name string) annotationV0.Annotation {
+			return annotationV0.Annotation{ObjectMeta: metav1.ObjectMeta{Name: name}}
+		}
+
+		tombstone := func(name string) annotationV0.Annotation {
+			now := metav1.Now()
+			a := anno(name)
+			a.SetDeletionTimestamp(&now)
+			return a
+		}
+
+		t.Run("deletes every annotation on the panel", func(t *testing.T) {
+			client := &fakeClient{searchPages: [][]annotationV0.Annotation{
+				{anno("a-1"), anno("a-2")},
+			}}
+			proxy := newProxy(client)
+
+			require.NoError(t, proxy.MassDelete(context.Background(), orgID, "dash-1", 2))
+			assert.Equal(t, []string{"a-1", "a-2"}, client.deletedNames)
+		})
+
+		t.Run("follows the continue token across pages", func(t *testing.T) {
+			client := &fakeClient{searchPages: [][]annotationV0.Annotation{
+				{anno("a-1")},
+				{anno("a-2")},
+				{anno("a-3")},
+			}}
+			proxy := newProxy(client)
+
+			require.NoError(t, proxy.MassDelete(context.Background(), orgID, "dash-1", 2))
+			assert.Equal(t, []string{"a-1", "a-2", "a-3"}, client.deletedNames)
+			assert.Equal(t, []string{"", "1", "2"}, client.searchTokens, "each page is fetched with the prior page's token")
+		})
+
+		t.Run("skips records already tombstoned", func(t *testing.T) {
+			client := &fakeClient{searchPages: [][]annotationV0.Annotation{
+				{anno("a-1"), tombstone("a-2"), anno("a-3")},
+			}}
+			proxy := newProxy(client)
+
+			require.NoError(t, proxy.MassDelete(context.Background(), orgID, "dash-1", 2))
+			assert.Equal(t, []string{"a-1", "a-3"}, client.deletedNames)
+		})
+
+		t.Run("is a no-op when the panel has no annotations", func(t *testing.T) {
+			client := &fakeClient{}
+			proxy := newProxy(client)
+
+			require.NoError(t, proxy.MassDelete(context.Background(), orgID, "dash-1", 2))
+			assert.Empty(t, client.deletedNames)
+		})
+
+		t.Run("propagates a search failure", func(t *testing.T) {
+			client := &fakeClient{searchErr: assert.AnError}
+			proxy := newProxy(client)
+
+			require.ErrorIs(t, proxy.MassDelete(context.Background(), orgID, "dash-1", 2), assert.AnError)
+			assert.Empty(t, client.deletedNames)
+		})
+
+		t.Run("stops and propagates a delete failure", func(t *testing.T) {
+			client := &fakeClient{
+				searchPages: [][]annotationV0.Annotation{{anno("a-1"), anno("a-2")}},
+				deleteErr:   assert.AnError,
+			}
+			proxy := newProxy(client)
+
+			require.ErrorIs(t, proxy.MassDelete(context.Background(), orgID, "dash-1", 2), assert.AnError)
+			assert.Equal(t, []string{"a-1"}, client.deletedNames, "it stops at the first failure")
 		})
 	})
 }

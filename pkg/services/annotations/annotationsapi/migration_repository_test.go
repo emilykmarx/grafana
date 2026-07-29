@@ -62,6 +62,15 @@ type fakeProxy struct {
 
 	deleteErr   error
 	deleteCalls int
+
+	massDeleteErr   error
+	massDeleteCalls []massDeleteCall
+}
+
+type massDeleteCall struct {
+	orgID        int64
+	dashboardUID string
+	panelID      int64
 }
 
 func (f *fakeProxy) List(_ context.Context, _ int64, query *annotations.ItemQuery) ([]*annotations.ItemDTO, error) {
@@ -83,6 +92,10 @@ func (f *fakeProxy) Update(context.Context, int64, int64, *annotations.Item) err
 func (f *fakeProxy) Delete(context.Context, int64, int64) error {
 	f.deleteCalls++
 	return f.deleteErr
+}
+func (f *fakeProxy) MassDelete(_ context.Context, orgID int64, dashboardUID string, panelID int64) error {
+	f.massDeleteCalls = append(f.massDeleteCalls, massDeleteCall{orgID: orgID, dashboardUID: dashboardUID, panelID: panelID})
+	return f.massDeleteErr
 }
 
 type fakeReader struct {
@@ -490,13 +503,63 @@ func TestMigrationRepository_Delete(t *testing.T) {
 		require.Len(t, legacy.deleteParams, 1)
 	})
 
-	t.Run("mass delete by dashboard/panel goes straight to legacy", func(t *testing.T) {
+	t.Run("mass delete clears the new store then dual-deletes the legacy copies", func(t *testing.T) {
 		legacy := &fakeLegacy{}
 		proxy := &fakeProxy{}
 		repo := newTestRepo(t, "proxy-all", legacy, proxy, usertest.NewUserServiceFake())
 
-		require.NoError(t, repo.Delete(context.Background(), &annotations.DeleteParams{OrgID: 1, DashboardID: 9, PanelID: 2}))
-		assert.Zero(t, proxy.deleteCalls)
+		params := &annotations.DeleteParams{OrgID: 1, DashboardUID: "dash-1", PanelID: 2}
+		require.NoError(t, repo.Delete(context.Background(), params))
+
+		require.Len(t, proxy.massDeleteCalls, 1)
+		assert.Equal(t, massDeleteCall{orgID: 1, dashboardUID: "dash-1", panelID: 2}, proxy.massDeleteCalls[0])
 		require.Len(t, legacy.deleteParams, 1)
+		assert.Zero(t, proxy.deleteCalls, "mass delete must not use the single-delete path")
+	})
+
+	t.Run("mass delete succeeds even when the best-effort legacy delete fails", func(t *testing.T) {
+		legacy := &fakeLegacy{deleteErr: assert.AnError}
+		proxy := &fakeProxy{}
+		repo := newTestRepo(t, "proxy-all", legacy, proxy, usertest.NewUserServiceFake())
+
+		params := &annotations.DeleteParams{OrgID: 1, DashboardUID: "dash-1", PanelID: 2}
+		require.NoError(t, repo.Delete(context.Background(), params))
+		require.Len(t, proxy.massDeleteCalls, 1)
+	})
+
+	t.Run("mass delete propagates new-store errors without deleting the legacy copies", func(t *testing.T) {
+		legacy := &fakeLegacy{}
+		proxy := &fakeProxy{massDeleteErr: assert.AnError}
+		repo := newTestRepo(t, "proxy-all", legacy, proxy, usertest.NewUserServiceFake())
+
+		params := &annotations.DeleteParams{OrgID: 1, DashboardUID: "dash-1", PanelID: 2}
+		require.ErrorIs(t, repo.Delete(context.Background(), params), assert.AnError)
+		assert.Empty(t, legacy.deleteParams)
+	})
+
+	t.Run("mass delete without a dashboard UID clears legacy and skips the new store", func(t *testing.T) {
+		legacy := &fakeLegacy{}
+		proxy := &fakeProxy{}
+		repo := newTestRepo(t, "proxy-writes", legacy, proxy, usertest.NewUserServiceFake())
+
+		// nolint: staticcheck
+		params := &annotations.DeleteParams{OrgID: 1, DashboardID: 9, PanelID: 2}
+		require.NoError(t, repo.Delete(context.Background(), params))
+
+		assert.Empty(t, proxy.massDeleteCalls)
+		require.Len(t, legacy.deleteParams, 1)
+	})
+
+	t.Run("mass delete without a dashboard UID errors in proxy-all", func(t *testing.T) {
+		legacy := &fakeLegacy{}
+		proxy := &fakeProxy{}
+		repo := newTestRepo(t, "proxy-all", legacy, proxy, usertest.NewUserServiceFake())
+
+		// nolint: staticcheck
+		params := &annotations.DeleteParams{OrgID: 1, DashboardID: 9, PanelID: 2}
+		require.ErrorIs(t, repo.Delete(context.Background(), params), errMassDeleteNeedsUID)
+
+		assert.Empty(t, proxy.massDeleteCalls)
+		require.Len(t, legacy.deleteParams, 1, "legacy copies are still removed")
 	})
 }

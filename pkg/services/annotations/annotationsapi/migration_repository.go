@@ -17,6 +17,7 @@ type annotationProxy interface {
 	Create(ctx context.Context, orgID int64, item *annotations.Item) (int64, error)
 	Update(ctx context.Context, orgID int64, annotationID int64, item *annotations.Item) error
 	Delete(ctx context.Context, orgID int64, annotationID int64) error
+	MassDelete(ctx context.Context, orgID int64, dashboardUID string, panelID int64) error
 	Get(ctx context.Context, orgID int64, annotationID int64) (*annotations.ItemDTO, error)
 	List(ctx context.Context, orgID int64, query *annotations.ItemQuery) ([]*annotations.ItemDTO, error)
 }
@@ -174,9 +175,9 @@ func (r *migrationRepository) Update(ctx context.Context, item *annotations.Item
 // When a record is already deleted in the new store (ErrGone), we still best-effort delete the
 // legacy record to ensure consistency.
 func (r *migrationRepository) Delete(ctx context.Context, params *annotations.DeleteParams) error {
-	// No ID means a mass delete by dashboard/panel, which the proxy can't express.
+	// No ID means a mass delete by dashboard/panel, which takes a different path.
 	if params.ID == 0 {
-		return r.legacy.Delete(ctx, params)
+		return r.massDelete(ctx, params)
 	}
 	err := r.proxy.Delete(ctx, params.OrgID, params.ID)
 	switch {
@@ -194,6 +195,46 @@ func (r *migrationRepository) Delete(ctx context.Context, params *annotations.De
 		return err
 	}
 }
+
+// massDelete removes every annotation on a dashboard panel from both stores.
+//
+// The new store only indexes annotations by dashboard UID, so a request that carries just
+// the deprecated numeric dashboard ID can't be expressed against it. The legacy HTTP handler
+// resolves the UID before calling us, so this is a safety net for other callers: we delete
+// the legacy copies and report the new store as unhandled rather than silently leaving
+// records behind.
+func (r *migrationRepository) massDelete(ctx context.Context, params *annotations.DeleteParams) error {
+	if params.DashboardUID == "" {
+		if err := r.legacy.Delete(ctx, params); err != nil {
+			return err
+		}
+		if r.cfg.AnnotationAppPlatform.ProxyAll() {
+			return errMassDeleteNeedsUID
+		}
+		// nolint: staticcheck
+		r.logger.Warn("mass delete without a dashboard UID only cleared legacy annotations",
+			"orgID", params.OrgID, "dashboardID", params.DashboardID, "panelID", params.PanelID)
+		return nil
+	}
+
+	if err := r.proxy.MassDelete(ctx, params.OrgID, params.DashboardUID, params.PanelID); err != nil {
+		// The new store is the source of truth for user annotations, so surface the failure
+		// instead of deleting only the legacy copies and reporting success.
+		return err
+	}
+
+	// Best-effort, matching the single delete: a failure here means the annotations could
+	// briefly resurface in a merged read until legacy is retired. A retry lands here again.
+	if err := r.legacy.Delete(ctx, params); err != nil {
+		r.logger.Warn("failed to delete legacy copies after new-store mass delete",
+			"orgID", params.OrgID, "dashboardUID", params.DashboardUID, "panelID", params.PanelID, "err", err)
+	}
+	return nil
+}
+
+// errMassDeleteNeedsUID is returned when a mass delete cannot reach the new store because the
+// caller supplied only the deprecated numeric dashboard ID.
+var errMassDeleteNeedsUID = errors.New("mass delete requires a dashboard UID to reach the new annotation store")
 
 // TODO: FindTags reads from legacy only. Follow up to proxy tag searches to the new store.
 func (r *migrationRepository) FindTags(ctx context.Context, query *annotations.TagsQuery) (annotations.FindTagsResult, error) {
