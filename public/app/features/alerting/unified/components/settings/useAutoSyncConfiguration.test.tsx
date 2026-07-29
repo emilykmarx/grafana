@@ -6,6 +6,7 @@ import { configureStore } from 'app/store/configureStore';
 import { AccessControlAction } from 'app/types/accessControl';
 
 import { ALERTMANAGER_PROVIDED_ENTITY_TAGS, alertmanagerApi } from '../../api/alertmanagerApi';
+import { MERGE_COMMITTED_REASON } from '../../api/configApi';
 import { setupMswServer } from '../../mockApi';
 import { grantUserPermissions } from '../../mocks';
 import { setupAlertmanagersStatus } from '../../mocks/server/configure/alertmanagers';
@@ -208,6 +209,115 @@ describe('useAutoSyncConfiguration — state resolution', () => {
     expect(result.current.state.kind).toBe('unconfigured');
     // Nothing was read, so there is nothing to write into either.
     expect(result.current.isReady).toBe(false);
+  });
+});
+
+describe('useAutoSyncConfiguration — sync health', () => {
+  it('reports healthy when the condition is True for the configured UID', async () => {
+    setupAutoSyncConfig(server, {
+      specUid: 'mimir-uid',
+      statusUid: 'mimir-uid',
+      condition: { status: 'True', reason: 'SyncSucceeded' },
+    });
+    setupDatasourcesEndpoint(server, [MIMIR_DS]);
+
+    const { result } = renderAutoSyncHook();
+    await waitFor(() => expect(result.current.syncHealth).toEqual({ kind: 'healthy' }));
+  });
+
+  it('reports merge-committed — not healthy — when a True condition carries the terminal MergeCommitted reason', async () => {
+    // The worker keeps status True on the terminal merge so the synced-at timestamp survives, so the
+    // reason is all that separates a stopped sync from a running one.
+    setupAutoSyncConfig(server, {
+      specUid: 'mimir-uid',
+      statusUid: 'mimir-uid',
+      condition: {
+        status: 'True',
+        reason: MERGE_COMMITTED_REASON,
+        message: 'automatic sync from the datasource has stopped',
+      },
+    });
+    setupDatasourcesEndpoint(server, [MIMIR_DS]);
+
+    const { result } = renderAutoSyncHook();
+    await waitFor(() => expect(result.current.state.kind).toBe('configured'));
+    expect(result.current.syncHealth).toEqual({ kind: 'merge-committed' });
+  });
+
+  it('reports failing with the reason and message when the condition is False', async () => {
+    setupAutoSyncConfig(server, {
+      specUid: 'mimir-uid',
+      statusUid: 'mimir-uid',
+      condition: { status: 'False', reason: 'MimirFetchFailed', message: 'connection refused' },
+    });
+    setupDatasourcesEndpoint(server, [MIMIR_DS]);
+
+    const { result } = renderAutoSyncHook();
+    await waitFor(() =>
+      expect(result.current.syncHealth).toEqual({
+        kind: 'failing',
+        reason: 'MimirFetchFailed',
+        message: 'connection refused',
+      })
+    );
+  });
+
+  it('reports pending when no condition has been recorded yet', async () => {
+    setupAutoSyncConfig(server, { specUid: 'mimir-uid', statusUid: 'mimir-uid' });
+    setupDatasourcesEndpoint(server, [MIMIR_DS]);
+
+    const { result } = renderAutoSyncHook();
+    await waitFor(() => expect(result.current.syncHealth.kind).toBe('pending'));
+  });
+
+  it('reports pending — not healthy — when the condition describes a different UID', async () => {
+    // status lags spec by up to a poll tick; a verdict about the previous target says nothing here.
+    setupAutoSyncConfig(server, {
+      specUid: 'cortex-uid',
+      statusUid: 'mimir-uid',
+      condition: { status: 'True', reason: 'SyncSucceeded' },
+    });
+    setupDatasourcesEndpoint(server, [MIMIR_DS, CORTEX_DS]);
+
+    const { result } = renderAutoSyncHook();
+    await waitFor(() => expect(result.current.state.kind).toBe('configured'));
+    expect(result.current.syncHealth.kind).toBe('pending');
+  });
+
+  it('does not carry the previous target error text into a pending verdict', async () => {
+    // The pending badge renders reason/message in its tooltip, so forwarding them would pin
+    // mimir-uid's failure on the newly selected cortex-uid.
+    setupAutoSyncConfig(server, {
+      specUid: 'cortex-uid',
+      statusUid: 'mimir-uid',
+      condition: { status: 'False', reason: 'MimirFetchFailed', message: 'connection refused' },
+    });
+    setupDatasourcesEndpoint(server, [MIMIR_DS, CORTEX_DS]);
+
+    const { result } = renderAutoSyncHook();
+    await waitFor(() => expect(result.current.state.kind).toBe('configured'));
+    expect(result.current.syncHealth).toEqual({ kind: 'pending' });
+  });
+
+  it('reports pending — not healthy — after sync was disabled but status still names the old UID', async () => {
+    setupAutoSyncConfig(server, { statusUid: 'mimir-uid', condition: { status: 'True', reason: 'SyncSucceeded' } });
+    setupDatasourcesEndpoint(server, [MIMIR_DS]);
+
+    const { result } = renderAutoSyncHook();
+    await waitFor(() => expect(result.current.state.kind).toBe('unconfigured'));
+    expect(result.current.syncHealth.kind).toBe('pending');
+  });
+
+  it('reports pending when the condition status is Unknown', async () => {
+    setupAutoSyncConfig(server, {
+      specUid: 'mimir-uid',
+      statusUid: 'mimir-uid',
+      condition: { status: 'Unknown', reason: 'NotConfigured' },
+    });
+    setupDatasourcesEndpoint(server, [MIMIR_DS]);
+
+    const { result } = renderAutoSyncHook();
+    await waitFor(() => expect(result.current.syncHealth.kind).toBe('pending'));
   });
 });
 

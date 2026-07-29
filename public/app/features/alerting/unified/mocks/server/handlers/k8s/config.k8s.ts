@@ -2,10 +2,39 @@ import { HttpResponse, http } from 'msw';
 import { type SetupServer } from 'msw/node';
 
 import { API_GROUP, API_VERSION, type Config } from '@grafana/api-clients/rtkq/notifications.alerting/v0alpha1';
-import { CONFIG_SINGLETON_NAME } from 'app/features/alerting/unified/api/configApi';
+import {
+  CONFIG_SINGLETON_NAME,
+  type MERGE_COMMITTED_REASON,
+  SYNCED_CONDITION_TYPE,
+} from 'app/features/alerting/unified/api/configApi';
 import { ALERTING_API_SERVER_BASE_URL } from 'app/features/alerting/unified/mocks/server/utils';
 
 const CONFIG_URL = `${ALERTING_API_SERVER_BASE_URL}/namespaces/:namespace/configs/:name`;
+
+/**
+ * Reasons the worker actually writes onto the condition. These are the PascalCase strings produced
+ * by SyncReason.ConditionReason() in external_am_syncer.go — NOT the snake_case Go enum values
+ * (`mimir_fetch`, …), which never leave the backend. The ones production code matches on come from
+ * the shared constant, so a handler and the code reading it cannot drift apart on the spelling.
+ */
+type SyncConditionReason =
+  | 'SyncSucceeded'
+  | typeof MERGE_COMMITTED_REASON
+  | 'NotConfigured'
+  | 'DatasourceLookupFailed'
+  | 'MimirFetchFailed'
+  | 'ValidationFailed'
+  | 'SaveFailed'
+  | 'IdentifierMismatch'
+  | 'NoUpstreamConfig'
+  | 'ConfigReadFailed'
+  | 'SyncFailed';
+
+interface SyncConditionOptions {
+  status: 'True' | 'False' | 'Unknown';
+  reason: SyncConditionReason;
+  message?: string;
+}
 
 interface AutoSyncConfigOptions {
   /**
@@ -24,16 +53,33 @@ interface AutoSyncConfigOptions {
    * grafana.ini key is authoritative, spec is dormant, and UID writes are rejected on admission.
    */
   origin?: 'api' | 'ini';
+  /** The ExternalAlertmanagerSynced condition. Omit for a Config with no conditions recorded yet. */
+  condition?: SyncConditionOptions;
 }
 
 function buildAutoSyncConfig(name: string, options: AutoSyncConfigOptions = {}): Config {
-  const { specUid, statusUid, origin = 'api' } = options;
+  const { specUid, statusUid, origin = 'api', condition } = options;
   return {
     apiVersion: `${API_GROUP}/${API_VERSION}`,
     kind: 'Config',
     metadata: { name, namespace: 'default', resourceVersion: '1' },
     spec: specUid ? { externalAlertmanagerSync: { datasourceUid: specUid } } : {},
-    status: statusUid ? { externalAlertmanagerSync: { datasourceUid: statusUid, origin } } : {},
+    status: {
+      ...(statusUid ? { externalAlertmanagerSync: { datasourceUid: statusUid, origin } } : {}),
+      ...(condition
+        ? {
+            conditions: [
+              {
+                type: SYNCED_CONDITION_TYPE,
+                status: condition.status,
+                reason: condition.reason,
+                ...(condition.message ? { message: condition.message } : {}),
+                lastTransitionTime: '2026-01-01T00:00:00.000Z',
+              },
+            ],
+          }
+        : {}),
+    },
   };
 }
 
@@ -59,7 +105,7 @@ const configHandler = (options: AutoSyncConfigOptions = {}, onRequest?: () => vo
  * Override the Config GET to drive external Alertmanager auto-sync state. Pass `specUid` to
  * simulate an API-configured active sync; omit it for an inactive, empty Config. Pass `statusUid`
  * alone to simulate a stale status that must not count as active. Pass `origin: 'ini'` with
- * `statusUid` for an operator-managed org (also an active sync).
+ * `statusUid` for an operator-managed org (also an active sync), and `condition` to drive the badge.
  *
  * Returns a `requestSpy` that fires on every GET, so a test can assert the query was — or, when a
  * permission gate should short-circuit it, was not — made.

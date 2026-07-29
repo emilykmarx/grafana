@@ -1,6 +1,7 @@
 import { skipToken } from '@reduxjs/toolkit/query';
 import { useMemo, useState } from 'react';
 
+import { type Config } from '@grafana/api-clients/rtkq/notifications.alerting/v0alpha1';
 import { type DataSourceSettings } from '@grafana/data';
 import { t } from '@grafana/i18n';
 import { config } from '@grafana/runtime';
@@ -14,7 +15,7 @@ import { AccessControlAction } from 'app/types/accessControl';
 import { useDispatch } from 'app/types/store';
 
 import { ALERTMANAGER_PROVIDED_ENTITY_TAGS, alertmanagerApi } from '../../api/alertmanagerApi';
-import { CONFIG_SINGLETON_NAME, configApi } from '../../api/configApi';
+import { CONFIG_SINGLETON_NAME, MERGE_COMMITTED_REASON, SYNCED_CONDITION_TYPE, configApi } from '../../api/configApi';
 import { dataSourcesApi } from '../../api/dataSourcesApi';
 import { isNotFoundError } from '../../api/util';
 import { isAlertmanagerDataSource } from '../../utils/datasource';
@@ -27,8 +28,32 @@ export type AutoSyncState =
   | { kind: 'no-datasources' }
   | { kind: 'orphan-uid'; uid: string };
 
+/**
+ * Health of the running sync, from the ExternalAlertmanagerSynced condition. Deliberately separate
+ * from AutoSyncState: state answers "what is configured", health answers "is it working".
+ */
+export type AutoSyncHealth =
+  | { kind: 'healthy' }
+  | { kind: 'merge-committed' }
+  | { kind: 'failing'; reason: string; message?: string }
+  | { kind: 'pending'; reason?: string; message?: string };
+
+/**
+ * Detail to show for a health verdict. The worker writes a human-readable message alongside the
+ * machine reason; prefer it, and fall back to the raw reason so an unmapped future reason still
+ * tells the user something. Only the verdicts that carry worker-authored detail are accepted; the
+ * rest are described by the UI's own translated copy, so a new verdict has to opt in here.
+ */
+export function describeSyncHealth(
+  health: Extract<AutoSyncHealth, { kind: 'failing' | 'pending' }>
+): string | undefined {
+  return health.message ?? health.reason;
+}
+
 export interface UseAutoSyncConfigurationResult {
   state: AutoSyncState;
+  /** Health of the last sync attempt, for the status badge and the failure and merge callouts. */
+  syncHealth: AutoSyncHealth;
   mimirCortexDatasources: Array<DataSourceSettings<AlertManagerDataSourceJsonData>>;
   selectedUid: string;
   setSelectedUid: (uid: string) => void;
@@ -63,6 +88,31 @@ export function hasConfiguredUid(state: AutoSyncState): state is Extract<AutoSyn
 
 export function isOperatorManaged(state: AutoSyncState): state is Extract<AutoSyncState, { kind: 'operator-managed' }> {
   return state.kind === 'operator-managed';
+}
+
+function deriveSyncHealth(configResource: Config | undefined, configuredUid: string): AutoSyncHealth {
+  const condition = configResource?.status?.conditions?.find((c) => c.type === SYNCED_CONDITION_TYPE);
+  const observedUid = configResource?.status?.externalAlertmanagerSync?.datasourceUid ?? '';
+
+  // status lags spec by up to one poll tick. A condition describing a different UID than the one now
+  // configured says nothing about the current target, so don't inherit the previous target's verdict.
+  // This also covers "just disabled": spec is empty while status still names the old UID.
+  const isStale = observedUid !== configuredUid;
+  if (!condition || isStale) {
+    // Deliberately no reason/message: they describe the stale attempt, and the pending badge renders
+    // them in its tooltip, which would pin the previous target's error on the current one.
+    return { kind: 'pending' };
+  }
+  if (condition.status === 'False') {
+    return { kind: 'failing', reason: condition.reason, message: condition.message };
+  }
+  if (condition.status === 'True') {
+    // True does not imply "still running": the worker keeps True on the terminal merge so the
+    // synced-at timestamp survives, and flips only the reason. Reading it as healthy would claim an
+    // active sync forever after the worker stopped.
+    return condition.reason === MERGE_COMMITTED_REASON ? { kind: 'merge-committed' } : { kind: 'healthy' };
+  }
+  return { kind: 'pending', reason: condition.reason, message: condition.message };
 }
 
 export function useAutoSyncConfiguration(): UseAutoSyncConfigurationResult {
@@ -114,6 +164,8 @@ export function useAutoSyncConfiguration(): UseAutoSyncConfigurationResult {
     }
     return { kind: 'unconfigured' };
   }, [isIniManaged, configuredUid, hasMatchingDatasource, mimirCortexDatasources.length]);
+
+  const syncHealth = useMemo(() => deriveSyncHealth(configResource, configuredUid), [configResource, configuredUid]);
 
   const notify = useAppNotification();
   const dispatch = useDispatch();
@@ -183,6 +235,7 @@ export function useAutoSyncConfiguration(): UseAutoSyncConfigurationResult {
 
   return {
     state,
+    syncHealth,
     mimirCortexDatasources,
     selectedUid,
     setSelectedUid: (uid: string) => setSelectedOverride(uid),
