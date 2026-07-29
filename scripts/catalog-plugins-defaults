@@ -9,5 +9,6 @@ stackdriver
 mssql
 jaeger
 loki
+influxdb
 grafana-postgresql-datasource
 grafana-pyroscope-datasource
