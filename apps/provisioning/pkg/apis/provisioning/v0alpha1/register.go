@@ -148,10 +148,9 @@ var ConnectionResourceInfo = utils.NewResourceInfo(GROUP, VERSION,
 					appID = m.Spec.GitHubEnterprise.AppID
 					installationID = m.Spec.GitHubEnterprise.InstallationID
 				}
-			case BitbucketConnectionType:
-				clientID = m.Spec.Bitbucket.ClientID
-			case GitlabConnectionType:
-				clientID = m.Spec.Gitlab.ClientID
+			}
+			if m.Spec.OAuth != nil {
+				clientID = m.Spec.OAuth.ClientID
 			}
 
 			return []interface{}{
@@ -197,6 +196,7 @@ func AddKnownTypes(gv schema.GroupVersion, scheme *runtime.Scheme) error {
 		&FileList{},
 		&HistoryList{},
 		&TestResults{},
+		&ConnectionAuthorizeRequest{},
 		&ResourceList{},
 		&ResourceStats{},
 		&Job{},
