@@ -19,7 +19,7 @@ export interface EditableDashboardElement {
   /**
    * Hook that returns edit pane options
    */
-  useEditPaneOptions(isNewElement: boolean): OptionsPaneCategoryDescriptor[];
+  useEditPaneOptions?(isNewElement: boolean): OptionsPaneCategoryDescriptor[];
 
   /**
    * Panel Actions

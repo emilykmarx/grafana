@@ -18,6 +18,7 @@ import { DashboardLinksSet } from '../../settings/links/DashboardLinksSet';
 import { DashboardFiltersSet } from '../../settings/variables/DashboardFiltersSet';
 import { dashboardSceneGraph } from '../../utils/dashboardSceneGraph';
 import { VariablesDependenciesButton } from '../../variables/VariablesDependenciesButton';
+import { SidebarCategoryType } from '../types';
 
 import { DashboardAnnotationsList } from './DashboardAnnotationsList';
 import { DashboardDescriptionInput, DashboardTitleInput } from './DashboardBasicOptions';
@@ -141,7 +142,7 @@ function useFiltersCategory(dashboard: DashboardScene): OptionsPaneCategoryDescr
 
     const category = new OptionsPaneCategoryDescriptor({
       title: t('dashboard-scene.use-filters-category.category.title.filters', 'Filters'),
-      id: 'dashboard-filters',
+      id: SidebarCategoryType.DashboardFilters,
     });
 
     const hasFilters =
@@ -179,7 +180,7 @@ function useVariablesCategory(dashboard: DashboardScene): OptionsPaneCategoryDes
   return useMemo(() => {
     const category = new OptionsPaneCategoryDescriptor({
       title: t('dashboard-scene.use-variables-category.category.title.variables', 'Variables'),
-      id: 'dashboard-variables',
+      id: SidebarCategoryType.DashboardVariables,
     });
 
     if ($variables instanceof SceneVariableSet && $variables.state.variables.length) {
@@ -229,7 +230,7 @@ function useAnnotationsCategory(dataLayerSet: DashboardDataLayerSet): OptionsPan
   return useMemo(() => {
     const category = new OptionsPaneCategoryDescriptor({
       title: t('dashboard-scene.use-annotations-category.category.title.annotations', 'Annotations'),
-      id: 'dashboard-annotations',
+      id: SidebarCategoryType.DashboardAnnotations,
     });
 
     category.addItem(
@@ -253,7 +254,7 @@ function useLinksCategory(dashboard: DashboardScene): OptionsPaneCategoryDescrip
   return useMemo(() => {
     const category = new OptionsPaneCategoryDescriptor({
       title: t('dashboard-scene.use-links-category.category.title.links', 'Links'),
-      id: 'dashboard-links',
+      id: SidebarCategoryType.DashboardLinks,
     });
 
     if (links.length) {
