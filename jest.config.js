@@ -92,7 +92,6 @@ module.exports = {
     // Decoupled plugins run their own tests so ignoring them here.
     '<rootDir>/public/app/plugins/datasource/azuremonitor',
     '<rootDir>/public/app/plugins/datasource/grafana-testdata-datasource',
-    '<rootDir>/public/app/plugins/datasource/influxdb',
     '<rootDir>/public/app/plugins/datasource/graphite',
     '<rootDir>/public/app/plugins/datasource/mysql',
   ],
