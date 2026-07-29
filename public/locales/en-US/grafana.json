@@ -6180,11 +6180,6 @@
         "query-editor-modal-title": "Annotation Query",
         "show-in": "Show in"
       },
-      "annotations": {
-        "add-annotation": "Add annotation",
-        "reorder": "Drag to reorder",
-        "select-annotation": "Select"
-      },
       "dashboard-options": {
         "title": "Options",
         "tooltip": "Dashboard options"
@@ -6221,12 +6216,6 @@
         "title": "Export"
       },
       "filters": "Filters",
-      "links": {
-        "add-link": "Add link",
-        "reorder": "Drag to reorder",
-        "select-link": "Select",
-        "untitled": "Untitled link"
-      },
       "open": "Filters overview",
       "outline": {
         "title": "Outline",
@@ -6293,12 +6282,9 @@
         "type-category": "{{type}} options"
       },
       "variables": {
-        "add-variable": "Add variable",
         "change-type": "Change variable type",
-        "reorder": "Drag to reorder",
         "select-type": "Choose variable type",
-        "select-type-card-tooltip": "Click to select type",
-        "select-variable": "Select"
+        "select-type-card-tooltip": "Click to select type"
       },
       "view-panel": {
         "disabled": "Disabled",
@@ -6775,16 +6761,6 @@
       "delete-text": "Are you sure you want to delete: {{name}}?",
       "delete-title": "Delete annotation query"
     },
-    "annotation-list": {
-      "create-drag-end-handler": {
-        "description": {
-          "reorder-annotations-list": "Reorder annotations list"
-        }
-      },
-      "render-list": {
-        "aria-label-annotation": "Annotation"
-      }
-    },
     "annotation-query-library-dropdown": {
       "use-saved-query": "Use saved query"
     },
@@ -7250,16 +7226,6 @@
       "delete-text": "Are you sure you want to delete: {{name}}?",
       "delete-title": "Delete link",
       "unnamed": "Unnamed link"
-    },
-    "link-list": {
-      "create-drag-end-handler": {
-        "description": {
-          "reorder-links-list": "Reorder links list"
-        }
-      },
-      "render-list": {
-        "aria-label-link": "Link"
-      }
     },
     "link-options": {
       "icon": "Icon",
@@ -7806,13 +7772,6 @@
       "title-delete-variable": "Delete variable",
       "tooltip-duplicate-variable": "Duplicate variable",
       "tooltip-remove-variable": "Remove variable"
-    },
-    "variable-list": {
-      "create-drag-end-handler": {
-        "description": {
-          "reorder-variables-list": "Reorder variables list"
-        }
-      }
     },
     "variable-multi-prop-static-options-form": {
       "aria-label-static-options": "Static options"
