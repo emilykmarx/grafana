@@ -140,7 +140,7 @@ func TestIntegrationPluginManager(t *testing.T) {
 	td := testdatasource.ProvideService()
 	my := mysql.ProvideService()
 	graf := grafanads.ProvideService(nil, features)
-	coreRegistry := coreplugin.ProvideCoreRegistry(tracing.InitializeTracerForTest(), am, cw, grap, idb, td, my, graf)
+	coreRegistry := coreplugin.ProvideCoreRegistry(tracing.InitializeTracerForTest(), am, cw, grap, td, my, graf)
 
 	testCtx := pluginsintegration.CreateIntegrationTestCtx(t, cfg, coreRegistry)
 
