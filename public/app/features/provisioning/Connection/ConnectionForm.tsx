@@ -148,6 +148,22 @@ export function ConnectionForm({ data }: ConnectionFormProps) {
 
   const [submitError, setSubmitError] = useState<string>();
 
+  const needsReauthorization =
+    isEdit &&
+    isOAuthConnectionType(data?.spec?.type) &&
+    Boolean(
+      data?.status?.conditions?.some(
+        (c) => c.type === 'Ready' && c.status === 'False' && c.reason === 'AuthenticationFailed'
+      )
+    );
+
+  const handleReauthorize = () => {
+    const formData = getValues();
+    if (connectionName && formData.clientID && isOAuthConnectionType(formData.type)) {
+      startOAuthAuthorization(formData.type, formData.clientID, connectionName, formData.serverUrl);
+    }
+  };
+
   const onSubmit = async (form: ConnectionFormData) => {
     setSubmitError(undefined);
     try {
@@ -213,6 +229,19 @@ export function ConnectionForm({ data }: ConnectionFormProps) {
         <FormPrompt onDiscard={reset} confirmRedirect={isDirty} />
         <Stack direction="column" gap={2}>
           {submitError && <Alert severity="error" title={submitError} />}
+          {needsReauthorization && (
+            <Alert
+              severity="warning"
+              title={t('provisioning.connection-form.reauthorize-title', 'Authorization expired')}
+              buttonContent={t('provisioning.connection-form.reauthorize-button', 'Reauthorize')}
+              onRemove={handleReauthorize}
+            >
+              {t(
+                'provisioning.connection-form.reauthorize-body',
+                'The provider rejected the connection credentials. Reauthorize to restore access.'
+              )}
+            </Alert>
+          )}
           <Field
             noMargin
             htmlFor="type"
