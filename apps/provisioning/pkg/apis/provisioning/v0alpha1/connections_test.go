@@ -29,7 +29,7 @@ func TestConnections_IsGitHub(t *testing.T) {
 		{
 			name: "gitlab spec returns false",
 			connectionInput: ConnectionSpec{
-				Gitlab: &GitlabConnectionConfig{},
+				OAuth: &ConnectionOAuthConfig{},
 			},
 		},
 		{
